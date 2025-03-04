@@ -1,0 +1,79 @@
+## Personalized AI Agent Lambda Function
+
+## Overview
+This AWS Lambda function implements a custom AI agent with Retrieval-Augmented Generation (RAG) capabilities, designed to interact with a Supabase database and provide intelligent responses to user queries.
+
+## Features
+
+Retrieval-Augmented Generation (RAG): Dynamically retrieves and incorporates information from Supabase database
+Multi-step Reasoning: Supports complex query processing through iterative function calls
+Flexible Query Handling: Can process various types of user queries
+Extensible Architecture: Designed to easily add more tools and functions in the future
+
+## Technologies Used
+
+AWS Lambda
+Node.js
+OpenRouter AI
+Supabase
+OpenAI-compatible Chat Completion API
+
+## Current Capabilities
+
+Query personal to-do lists
+Retrieve information from shopping lists
+Generate context-aware responses using AI
+
+## Planned Future Enhancements
+
+ Additional database interaction tools
+ More advanced reasoning capabilities
+ Integration with multiple data sources
+ Enhanced function calling mechanisms
+
+## Prerequisites
+
+AWS Account
+Supabase Project
+OpenRouter API Key
+Node.js 18.x or higher
+
+## Environment Variables
+Configure the following environment variables in AWS Lambda:
+
+OPENROUTER_API_KEY: API key for OpenRouter AI service
+SUPABASE_URL: Your Supabase project URL
+SUPABASE_KEY: Supabase project API key
+
+## Deployment
+
+Create a ZIP package including:
+
+index.mjs
+node_modules
+package.json
+
+Upload to AWS Lambda
+Configure environment variables
+Set up API Gateway for HTTP access
+
+## Function Flow
+
+Receive user query
+Analyze query requirements
+Retrieve relevant database information
+Generate AI-powered response
+Return structured response
+
+## Security Considerations
+
+Use AWS IAM roles with least privilege
+Encrypt sensitive environment variables
+Implement input validation
+Use HTTPS for all external communications
+
+## Logging and Monitoring
+
+CloudWatch logs capture function execution details
+Monitor Lambda function performance and errors
+
