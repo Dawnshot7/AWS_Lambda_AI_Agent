@@ -305,123 +305,167 @@ Function usage:
      of function_calls to retrieve the table after any modifications have been made to verify success.
      The user will be notified of success after the agent performs the function calls and returns the
      results to a new LLM chat completion to verify. 
+   - Make sure you read the full conversation history between the user, assistant, and functions to
+     ensure you know what has been done by the agent earlier in the conversation, make sure you aren't
+     repeating any steps, and take note of the rationale used by LLM chat completions in earlier steps.
 
 Remember: Your whole response must be valid JSON without any code tags
 `;
 
 async function makeAIRequest(messages) {
-  try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-        "HTTP-Referer": "https://yourwebsite.com",
-        "X-Title": "Your Website Name",
-      },
-      body: JSON.stringify({
-        model: "deepseek/deepseek-r1-distill-llama-70b:free",
-        messages: messages,
-        temperature: 0.2,
-      }),
-    });
+  const MAX_RETRIES = 5;
+  let retryCount = 0;
+  let lastError = null;
 
-    const data = await response.json();
-    
-    // Extract the message content
-    const rawReply = data.choices?.[0]?.message?.content || "No response";
-    
-    // Parse the JSON response
-    let parsedReply;
+  while (retryCount < MAX_RETRIES) {
     try {
+      console.log(`Attempt ${retryCount + 1}/${MAX_RETRIES} to make LLM request`);
+      
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+          "HTTP-Referer": "https://yourwebsite.com",
+          "X-Title": "Your Website Name",
+        },
+        body: JSON.stringify({
+          model: "deepseek/deepseek-r1-distill-llama-70b:free",
+          messages: messages,
+          temperature: 0.2,
+        }),
+      });
+
+      const data = await response.json();
+      
+      // Extract the message content
+      const rawReply = data.choices?.[0]?.message?.content || "No response";
+      
+      // Check if we got a valid response
+      if (rawReply.trim() === "No response" || !rawReply) {
+        console.log(`Attempt ${retryCount + 1} failed: Empty response received`);
+        retryCount++;
+        
+        // Add exponential backoff delay
+        const delay = Math.min(1000 * 2 ** retryCount, 10000); // Max 10 second delay
+        console.log(`Waiting ${delay}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      
+      // Parse the JSON response
+      try {
         // Check if the response is wrapped in a code block
         let jsonContent = rawReply;
-        
+  
         // Check for markdown code blocks (```json ... ```) and remove any preamble text
-        if (rawReply.includes("```json") || rawReply.includes("```")) {
-            // Extract content between the code block markers, ignoring any text before the code block
-            const codeBlockMatch = rawReply.match(/```(?:json)?\s*([\s\S]*?)```/);
-            if (codeBlockMatch && codeBlockMatch[1]) {
-                jsonContent = codeBlockMatch[1].trim();
-                // We've found and extracted the code block, so any preamble is automatically removed
-            }
-        } else {
-            // If no code block is found, remove any text before the first opening brace
-            const firstBraceIndex = jsonContent.indexOf('{');
-            if (firstBraceIndex > 0) {
-                jsonContent = jsonContent.substring(firstBraceIndex);
-            }
+        if (rawReply.includes("```")) {
+          // Extract content between the code block markers
+          const codeBlockMatch = rawReply.match(/```(?:json)?\s*([\s\S]*?)```/);
+          if (codeBlockMatch && codeBlockMatch[1]) {
+            jsonContent = codeBlockMatch[1].trim();
+          }
         }
 
-        // Make sure there was a response
-        if (rawReply.trim().startsWith("No response") ) {
-            return { answer: "Error: No response from LLM", function: "", parameters: {} };
-        }
-
-        // Remove any text before the first opening brace
+        // Remove any text before the first opening brace and after the last closing brace
         const firstBraceIndex = jsonContent.indexOf('{');
-        if (firstBraceIndex > 0) {
-            jsonContent = jsonContent.substring(firstBraceIndex);
+        const lastBraceIndex = jsonContent.lastIndexOf('}');
+        
+        if (firstBraceIndex >= 0 && lastBraceIndex > firstBraceIndex) {
+          jsonContent = jsonContent.substring(firstBraceIndex, lastBraceIndex + 1);
         }
 
         // Parse the cleaned JSON content
-        parsedReply = JSON.parse(jsonContent);
+        const parsedReply = JSON.parse(jsonContent);
         return parsedReply;
-    } catch (e) {
+      } catch (e) {
         console.error("Failed to parse response as JSON:", e);
         console.log("Raw response:", rawReply);
-        return { answer: "Error: Failed to parse AI response as JSON", function: "", parameters: {} };
+        
+        // If this was a parsing error, increment retry count
+        retryCount++;
+        lastError = e;
+        
+        // Add exponential backoff delay
+        const delay = Math.min(1000 * 2 ** retryCount, 10000);
+        console.log(`Waiting ${delay}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+    } catch (error) {
+      console.error(`Attempt ${retryCount + 1} failed with error:`, error);
+      retryCount++;
+      lastError = error;
+      
+      // If we've reached max retries, break out of the loop
+      if (retryCount >= MAX_RETRIES) {
+        break;
+      }
+      
+      // Add exponential backoff delay
+      const delay = Math.min(1000 * 2 ** retryCount, 10000);
+      console.log(`Waiting ${delay}ms before retry...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
-  } catch (error) {
-    console.error("Error making AI request:", error);
-    return { answer: "Error: Failed to communicate with AI service", function: "", parameters: {} };
   }
+
+  console.error(`Failed after ${MAX_RETRIES} attempts`);
+  return { 
+    answer: `Error: Failed to communicate with AI service after ${MAX_RETRIES} attempts. Last error: ${lastError?.message || "Unknown error"}`, 
+    function: "", 
+    parameters: {} 
+  };
 }
 
 async function executeFunctions(functionCalls) {
-    console.log(`Executing ${functionCalls.length} functions simultaneously`);
+  console.log(`Executing ${functionCalls.length} functions sequentially`);
 
-    // Create an array of promises for each function execution
-    const functionPromises = functionCalls.map(async (functionCall) => {
-        const { function: functionName, parameters } = functionCall;
-        
-        console.log(`Preparing function: ${functionName}`);
-        console.log(`Parameters:`, parameters);
-        
-        if (!functionMap[functionName]) {
-        return { 
-            function: functionName,
-            parameters: parameters,
-            result: { error: `Function ${functionName} not found` } 
-        };
-        }
-        
-        try {
-        const result = await functionMap[functionName](parameters);
-        return {
-            function: functionName,
-            parameters: parameters,
-            result
-        };
-        } catch (error) {
-        console.error(`Error executing function ${functionName}:`, error);
-        return { 
-            function: functionName,
-            parameters: parameters,
-            result: { error: `Failed to execute function ${functionName}` } 
-        };
-        }
-    });
+  // Array to store results
+  const results = [];
 
-    // Execute all functions simultaneously
-    const results = await Promise.all(functionPromises);
+  // Execute functions one after another
+  for (const functionCall of functionCalls) {
+      const { function: functionName, parameters } = functionCall;
+      
+      console.log(`Executing function: ${functionName}`);
+      console.log(`Parameters:`, parameters);
+      
+      if (!functionMap[functionName]) {
+          const result = { 
+              function: functionName,
+              parameters: parameters,
+              result: { error: `Function ${functionName} not found` } 
+          };
+          results.push(result);
+          continue;
+      }
+      
+      try {
+          const result = await functionMap[functionName](parameters);
+          const functionResult = {
+              function: functionName,
+              parameters: parameters,
+              result
+          };
+          results.push(functionResult);
+          console.log(`Function ${functionName} completed successfully`);
+      } catch (error) {
+          console.error(`Error executing function ${functionName}:`, error);
+          const errorResult = { 
+              function: functionName,
+              parameters: parameters,
+              result: { error: `Failed to execute function ${functionName}: ${error.message}` } 
+          };
+          results.push(errorResult);
+      }
+  }
 
-    // Combine all results into a single string
-    const combinedResults = results.map(item => {
-        return `Function '${item.function}(${JSON.stringify(item.parameters)})' output the result: ${JSON.stringify(item.result)}`;
-    }).join(". ");
+  // Combine all results into a single string
+  const combinedResults = results.map(item => {
+      return `Function '${item.function}(${JSON.stringify(item.parameters)})' output the result: ${JSON.stringify(item.result)}`;
+  }).join(". ");
 
-    return combinedResults;
+  return combinedResults;
 }
 
 async function runAIAgent(userPrompt) {
@@ -474,13 +518,16 @@ async function runAIAgent(userPrompt) {
       functionsResult = await executeFunctions(aiResponse.function_calls);
       console.log(`Results:`, functionsResult);
 
-      // Add the function call and result to the conversation history
-      conversationHistory.push(
-        { role: "assistant", content: `Calling function list: ${JSON.stringify(aiResponse.function_calls)} and reasoning: ${aiResponse.reasoning}.` }
-      );      
-      conversationHistory.push(
-        { role: "function", content: `${functionsResult}` }
-      );
+      // Add the function call and result to the conversation history, removing backslashes
+      conversationHistory.push({
+        role: "assistant", 
+        content: `Calling function list: ${JSON.stringify(aiResponse.function_calls)}. Reasoning: ${aiResponse.reasoning}`
+      });
+
+      conversationHistory.push({
+        role: "function", 
+        content: functionsResult
+      });
       
       // Continue the loop with the function result
       continue;
