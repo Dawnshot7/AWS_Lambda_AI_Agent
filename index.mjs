@@ -9,7 +9,8 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
 // Available functions mapping
 const functionMap = {
-  getDatabaseInfo: getDatabaseInfo
+  getDatabaseInfo: getDatabaseInfo,
+  dynamicSupabaseOperation: dynamicSupabaseOperation
 };
 
 // Initialize PostgreSQL client for Supabase
@@ -26,22 +27,135 @@ async function getDatabaseInfo(params) {
   return data;
 }
 
+// Dynamic Supabase Function Handler
+async function dynamicSupabaseOperation(params) {
+  try {
+    // Validate required parameters
+    if (!params.from || !params.action) {
+      throw new Error('Missing required parameters: "from" and "action"');
+    }
+
+    // Start with the base query
+    let query = supabase.from(params.from);
+    let queryResult = {};
+
+    // Map of supported actions
+    const actionMap = {
+      'select': () => {
+        // Handle select with optional columns
+        const columns = params.columns || '*';
+        return query.select(columns);
+      },
+      'insert': () => {
+        // Handle single or multiple inserts
+        const data = params.data;
+        return query.insert(data);
+      },
+      'update': () => {
+        // Handle update with conditions
+        const updateData = params.data;
+
+        // Apply conditions
+        if (params.conditions) {
+          params.conditions.forEach(condition => {
+            switch(condition.evaluation) {
+              case 'eq':
+                queryResult = query.update().eq(condition.value[0], condition.value[1]);
+                break;
+              case 'neq':
+                queryResult = query.update().neq(condition.value[0], condition.value[1]);
+                break;
+              case 'gt':
+                queryResult = query.update().gt(condition.value[0], condition.value[1]);
+                break;
+              case 'lt':
+                queryResult = query.update().lt(condition.value[0], condition.value[1]);
+                break;
+              case 'in':
+                queryResult = query.update().in(condition.value[0], condition.value[1]);
+                break;
+              default:
+                throw new Error(`Unsupported condition: ${condition.evaluation}`);
+            }
+          });
+        }
+
+        return queryResult;
+      },
+      'delete': () => {
+        // Handle delete with conditions
+        if (params.conditions) {
+          params.conditions.forEach(condition => {
+            switch(condition.evaluation) {
+              case 'eq':
+                queryResult = query.delete().eq(condition.value[0], condition.value[1]);
+                break;
+              case 'in':
+                queryResult = query.delete().in(condition.value[0], condition.value[1]);
+                break;
+              default:
+                throw new Error(`Unsupported condition: ${condition.evaluation}`);
+            }
+          });
+        }
+
+        return queryResult;
+      },
+      'upsert': () => {
+        // Handle upsert with optional conflict resolution
+        const data = params.data;
+        const options = params.options || {};
+        return query.upsert(data, options);
+      }
+    };
+
+    // Check if the action is supported
+    if (!actionMap[params.action]) {
+      throw new Error(`Unsupported action: ${params.action}`);
+    }
+
+    // Execute the query
+    const { data, error } = await actionMap[params.action]();
+
+    // Handle potential errors
+    if (error) {
+      console.error('Supabase Operation Error:', error);
+      return { 
+        success: false, 
+        error: error.message 
+      };
+    }
+
+    // Return successful result
+    return { 
+      success: true, 
+      data: data 
+    };
+  } catch (error) {
+    console.error('Dynamic Supabase Operation Error:', error);
+    return { 
+      success: false, 
+      error: error.message 
+    };
+  }
+}
+
 // Base instructions prompt that explains response format to the LLM
-const getInstructionsPrompt = () => `You are a helpful assistant that responds in JSON format.
-Your responses must be valid JSON without any code block wrappers.
-Your responses will be used programatically by an AI agent, so the format of the 
+const getInstructionsPrompt = () => `- You are a helpful assistant that responds in JSON format.
+- Your responses must be valid JSON without any code block wrappers.
+- Your responses will be used programatically by an AI agent, so the format of the 
    response is important.
-Because you are part of this AI agent, you can utilize functions that can be called 
+- Because you are part of this AI agent, you can utilize functions that can be called 
    by populating the "function", "parameters", and "reasoning" fields in your structured response.
-You may need to utilize a data retrieval function to answer a question about information
+- You may need to utilize a data retrieval function to answer a question about information
    in a database if that information is needed to answer the question.
-This means you can't provide an answer to the user directly in this chat completion, and
+- This means you can't provide an answer to the user directly in this chat completion, and
    another request to an LLM will be made which will include the information that 
    the function retrieves from the database using the parameters you gave it.
-This is a multi-step process coordinated programatically by the AI agent, and you may
+- This is a multi-step process coordinated programatically by the AI agent, and you may
    be receiving the intial user query, or you may receive the results data from 
    function calls along with the conversation history and reasoning.
-Whether you are receiving the initial user query or function results and a 
+- Whether you are receiving the initial user query or function results and a 
    conversation history will be revealed further below in this system prompt.
 
 The JSON of your response should have the following structure:
@@ -60,36 +174,134 @@ The JSON of your response should have the following structure:
   ],
 }
 
-Only use a function if explicitly needed for tasks.
-For questions that need no functions to answer, just provide the answer directly.
-For questions that need multiple simultaneous function calls to answer, respond with a list of 
-functions to call and their parameters. There can be multiple rounds of multiple simultaneous function calls, and the agent will iteratively
-provide the information from all previous function calls to new, follow-up LLM chat
-completions, and those LLM chat completions can request further function calls until
-an answer to the user query can be generated. Do not prompt the user for further 
-information or permission to use functions. Assume that you are to infer what functions are needed,
-use them in batches preferably, or in sequence if needed, and provide an answer to the best of your ability when you have 
-gathered the information needed.
+- Only use a function if explicitly needed for tasks.
+- For questions that need no functions to answer, just provide the answer directly.
+- For questions that need multiple simultaneous function calls to answer, respond with a list of 
+   functions to call and their parameters. There can be multiple rounds of multiple simultaneous 
+   function calls, and the agent will iteratively provide the information from all previous 
+   function calls to new, follow-up LLM chat completions, and those LLM chat completions 
+   can request further function calls until an answer to the user query can be generated. 
+- Do not prompt the user for further information or permission to use functions. 
+- Assume that you are to infer what functions are needed, use them in batches preferably, 
+   or in sequence if needed, and provide an answer to the best of your ability when you have 
+   gathered the information needed.
 
 Current functions:
 1)
-Function name: getDatabaseInfo
-Function parameters: tableName
-Function description: This function will retrieve user information from a Supabase 
-   database. The available tables of information about the user can be accessed
-   by setting the tableName parameter. Available tableNames are "todo_list" and 
-   "shopping_list" and they represent the user's to-do list and shopping list. The 
-   user keeps these Supabase tables updated with the most current values, so you
-   need to access the correct table when the user asks about these lists. All you
-   need to do is set the "function" and "parameters" and "reasoning" fields in your response and the function
-   will do all of the work to retrieve the full list of items from Supabase and
-   provide this information back to another LLM chat completion to take the next step. 
-Function usage: Sample response from you: {"answer": "", "reasoning": "The user query requires 
-   information from the user's to-do and shopping lists, so I will call 
-   getDatabaseInfo('todo_list') and getDatabaseInfo('shopping_list') simultaneously 
-   since both are likely to be needed", "function_calls": [{"function": "getDatabaseInfo", 
-   "parameters": {"tableName": "todo_list"}}, {"function": "getDatabaseInfo", 
-   "parameters": {"tableName": "shopping_list"}}]}
+Function name: dynamicSupabaseOperation
+Function parameters: from, action, columns, data, conditions, options
+Function description: 
+   This function provides a flexible way to interact with the Supabase databases.
+   
+   Available Tables:
+   1) The user's current to-do list
+   - Table name: "todo_list"
+   - Columns: "id", "created_at", "description", "status"
+
+   2) The user's current shopping list
+   - Table name: "shopping_list"
+   - Columns: "id", "created_at", "description", "status"
+
+   Available Actions:
+   - "select": Retrieve data from the database
+   - "insert": Add new data to the database
+   - "update": Modify existing data in the database
+   - "delete": Remove data from the database
+   - "upsert": Insert or update data in the database
+
+Function usage:
+   Detailed Usage Guide:
+   - You can perform SELECT, INSERT, UPDATE, DELETE, and UPSERT operations
+   - Provides a structured way to query and modify database tables
+   - Supports complex conditions and filtering
+   
+   Function Call Structure:
+   {
+     "answer":""
+     "reasoning": "Explain the purpose of the database operation"
+     "function_calls": [
+       {
+        "function": "dynamicSupabaseOperation",
+        "parameters": {
+          "from": "table_name", // Required: specifies the target table
+          "action": "select|insert|update|delete|upsert", // Required: type of operation
+          "columns": "['column1', 'column2']", // Optional for select
+          "data": {}, // Data for insert/update/upsert
+          "conditions": [], // Optional filtering conditions
+        },
+      }
+    ]
+   }
+   
+   Condition Types:
+   - "eq": Equal to
+   - "neq": Not equal to
+   - "gt": Greater than
+   - "lt": Less than
+   - "in": Matches any value in a list
+   
+   Example Operations:
+   1. User query requires agent to retrieve active to-do and shopping items:
+   {
+     "answer":""
+     "reasoning": "Calling function dynamicSupabaseOperation with the action 'select' twice, 
+         once to collect the to-do list items, and once to collect the shopping list items, because
+         both will be needed to answer the user query"
+     "function_calls": [
+       {
+         "function": "dynamicSupabaseOperation",
+         "parameters": {
+           "from": "todo_list",
+           "action": "select",
+           "conditions": [{"evaluation": "eq", "value": ["status", "active"]}]
+         }
+       },
+       {
+        "function": "dynamicSupabaseOperation",
+        "parameters": {
+          "from": "shopping_list",
+          "action": "select",
+          "conditions": [{"evaluation": "eq", "value": ["status", "active"]}]
+        }
+       }
+     ],
+   }
+   
+   2. Update task status given the id of the list item:
+   {
+     "answer":""
+     "reasoning": "The user provided the id of the item on his to-do list to be marked as completed so
+        I will call function dynamicSupabaseOperation with the action 'update' using this ID. I then call
+        the same function with action 'select' to verify that the list item has been updated."
+     "function_calls": [{
+         "function": "dynamicSupabaseOperation",
+         "parameters": {
+           "from": "todo_list",
+           "action": "update",
+           "conditions": [{"evaluation": "eq", "value": ["id", 1]}],
+           "data": {"status": "completed"}
+         }  
+       },
+       {
+        "function": "dynamicSupabaseOperation",
+        "parameters": {
+          "from": "todo_list",
+          "action": "select",
+        }
+      },
+     ],
+   }
+
+   Additional instructions:
+   - If the user requests to delete or modify a list item based on it's 'description' you must
+     first select the full list and read all of the descriptions to find the ID of the matching
+     item. This means you cannot complete the deletion or modification in this chat completion. 
+     You must use RAG to get the list values and pass this back to the agent along with your 
+     reasonining which includes next steps.
+   - Always call the function dynamicSupabaseOperation with the action 'select' at the end of the list 
+     of function_calls to retrieve the list after any modifications have been made to verify success.
+     The user will be notified of success after the agent performs the function calls and returns the
+     results to a new LLM chat completion to verify. 
 
 Remember: Your whole response must be valid JSON without any code tags
 `;
@@ -324,10 +536,10 @@ export const handler = async (event) => {
         'Access-Control-Allow-Headers': 'Content-Type',
         'Access-Control-Allow-Methods': 'OPTIONS,POST,GET'
       },
-      body: JSON.stringify({
+      body: {
         message: result.answer,
         conversationHistory: result.conversationHistory
-      })
+      }
     };
   } catch (error) {
     console.error('Error processing request:', error);
