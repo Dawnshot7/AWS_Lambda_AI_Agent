@@ -225,9 +225,9 @@ Function usage:
         "parameters": {
           "from": "table_name", // Required: specifies the target table
           "action": "select|insert|update|delete|upsert", // Required: type of operation
-          "columns": "['column1', 'column2']", // Optional for select
-          "data": {}, // Data for insert/update/upsert
-          "conditions": [], // Optional filtering conditions
+          "columns": "column1, column2", // Optional string for select with comma separated column names
+          "data": {}, // Data required for insert/update/upsert
+          "conditions": [{"evaluation": "condition type", "value": ["column name","value"]}], // Optional filtering conditions 
         },
       }
     ]
@@ -253,7 +253,8 @@ Function usage:
          "parameters": {
            "from": "todo_list",
            "action": "select",
-           "conditions": [{"evaluation": "eq", "value": ["status", "active"]}]
+           "conditions": [{"evaluation": "eq", "value": ["status", "active"]}],
+           "columns": "id, description"
          }
        },
        {
@@ -261,7 +262,8 @@ Function usage:
         "parameters": {
           "from": "shopping_list",
           "action": "select",
-          "conditions": [{"evaluation": "eq", "value": ["status", "active"]}]
+          "conditions": [{"evaluation": "eq", "value": ["status", "active"]}],
+          "columns": "id, description"
         }
        }
      ],
@@ -287,6 +289,7 @@ Function usage:
         "parameters": {
           "from": "todo_list",
           "action": "select",
+          "columns": "id, status"
         }
       },
      ],
@@ -299,7 +302,7 @@ Function usage:
      You must use RAG to get the list values and pass this back to the agent along with your 
      reasonining which includes next steps.
    - Always call the function dynamicSupabaseOperation with the action 'select' at the end of the list 
-     of function_calls to retrieve the list after any modifications have been made to verify success.
+     of function_calls to retrieve the table after any modifications have been made to verify success.
      The user will be notified of success after the agent performs the function calls and returns the
      results to a new LLM chat completion to verify. 
 
