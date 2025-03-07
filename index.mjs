@@ -318,6 +318,8 @@ async function makeAIRequest(messages) {
   let lastError = null;
 
   while (retryCount < MAX_RETRIES) {
+    perfMetrics.start('makeAIRequest');
+
     try {
       console.log(`Attempt ${retryCount + 1}/${MAX_RETRIES} to make LLM request`);
       
@@ -377,6 +379,8 @@ async function makeAIRequest(messages) {
 
         // Parse the cleaned JSON content
         const parsedReply = JSON.parse(jsonContent);
+        perfMetrics.end('makeAIRequest');
+
         return parsedReply;
       } catch (e) {
         console.error("Failed to parse response as JSON:", e);
@@ -390,6 +394,7 @@ async function makeAIRequest(messages) {
         const delay = Math.min(1000 * 2 ** retryCount, 10000);
         console.log(`Waiting ${delay}ms before retry...`);
         await new Promise(resolve => setTimeout(resolve, delay));
+        perfMetrics.end('makeAIRequest');
         continue;
       }
     } catch (error) {
@@ -406,9 +411,10 @@ async function makeAIRequest(messages) {
       const delay = Math.min(1000 * 2 ** retryCount, 10000);
       console.log(`Waiting ${delay}ms before retry...`);
       await new Promise(resolve => setTimeout(resolve, delay));
+      perfMetrics.end('makeAIRequest');
     }
   }
-
+  perfMetrics.end('makeAIRequest');
   console.error(`Failed after ${MAX_RETRIES} attempts`);
   return { 
     answer: `Error: Failed to communicate with AI service after ${MAX_RETRIES} attempts. Last error: ${lastError?.message || "Unknown error"}`, 
@@ -425,39 +431,41 @@ async function executeFunctions(functionCalls) {
 
   // Execute functions one after another
   for (const functionCall of functionCalls) {
-      const { function: functionName, parameters } = functionCall;
-      
-      console.log(`Executing function: ${functionName}`);
-      console.log(`Parameters:`, parameters);
-      
-      if (!functionMap[functionName]) {
-          const result = { 
-              function: functionName,
-              parameters: parameters,
-              result: { error: `Function ${functionName} not found` } 
-          };
-          results.push(result);
-          continue;
-      }
-      
-      try {
-          const result = await functionMap[functionName](parameters);
-          const functionResult = {
-              function: functionName,
-              parameters: parameters,
-              result
-          };
-          results.push(functionResult);
-          console.log(`Function ${functionName} completed successfully`);
-      } catch (error) {
-          console.error(`Error executing function ${functionName}:`, error);
-          const errorResult = { 
-              function: functionName,
-              parameters: parameters,
-              result: { error: `Failed to execute function ${functionName}: ${error.message}` } 
-          };
-          results.push(errorResult);
-      }
+    const { function: functionName, parameters } = functionCall;
+    perfMetrics.start(`function:${functionName}`);
+
+    console.log(`Executing function: ${functionName}`);
+    console.log(`Parameters:`, parameters);
+    
+    if (!functionMap[functionName]) {
+        const result = { 
+            function: functionName,
+            parameters: parameters,
+            result: { error: `Function ${functionName} not found` } 
+        };
+        results.push(result);
+        continue;
+    }
+    
+    try {
+        const result = await functionMap[functionName](parameters);
+        const functionResult = {
+            function: functionName,
+            parameters: parameters,
+            result
+        };
+        results.push(functionResult);
+        console.log(`Function ${functionName} completed successfully`);
+    } catch (error) {
+        console.error(`Error executing function ${functionName}:`, error);
+        const errorResult = { 
+            function: functionName,
+            parameters: parameters,
+            result: { error: `Failed to execute function ${functionName}: ${error.message}` } 
+        };
+        results.push(errorResult);
+    }
+    perfMetrics.end(`function:${functionName}`);
   }
 
   // Combine all results into a single string
@@ -469,6 +477,9 @@ async function executeFunctions(functionCalls) {
 }
 
 async function runAIAgent(userPrompt) {
+  perfMetrics.reset(); // Reset metrics at start
+  
+
   // Initialize conversation history
   let conversationHistory = [
     { role: "user", content: userPrompt }
@@ -480,6 +491,7 @@ async function runAIAgent(userPrompt) {
   let functionsResult = null;
 
   while (iterations < MAX_ITERATIONS) {
+    //perfMetrics.start('totalRuntime');
     iterations++;
     console.log(`\n--- Iteration ${iterations} ---`);
     
@@ -536,20 +548,23 @@ async function runAIAgent(userPrompt) {
       
       // Add the final response to conversation history
       conversationHistory.push({ role: "assistant", content: aiResponse.answer });
-      
+      //perfMetrics.end('totalRuntime');
+      perfMetrics.logMetrics();
       // Return the final result
       return {
         answer: aiResponse.answer,
-        conversationHistory: conversationHistory
+        conversationHistory: conversationHistory,
+        metrics: perfMetrics.getMetrics() // Include metrics in response
       };
     }
   }
-  
+  perfMetrics.logMetrics();
   // If we've reached the maximum number of iterations without a final answer
   console.log(`\nReached maximum iterations (${MAX_ITERATIONS}) without a final answer.`);
   return {
     answer: "I couldn't complete your request after several attempts. Please try rephrasing your question.",
-    conversationHistory: conversationHistory
+    conversationHistory: conversationHistory,
+    metrics: perfMetrics.getMetrics() // Include metrics in response
   };
 }
 
@@ -588,7 +603,8 @@ export const handler = async (event) => {
       },
       body: {
         message: result.answer,
-        conversationHistory: result.conversationHistory
+        conversationHistory: result.conversationHistory,
+        metrics: result.metrics
       }
     };
   } catch (error) {
@@ -605,9 +621,51 @@ export const handler = async (event) => {
       },
       body: {
         message: 'Error processing your request',
-        error: error.message
+        error: error.message,
+        metrics: result.metrics
       }
     };
+  }
+};
+
+// Performance tracking utility
+const perfMetrics = {
+  startTimes: {},
+  durations: {},
+  
+  start(label) {
+    this.startTimes[label] = Date.now();
+  },
+  
+  end(label) {
+    if (!this.startTimes[label]) {
+      console.warn(`No start time recorded for: ${label}`);
+      return;
+    }
+    
+    const duration = Date.now() - this.startTimes[label];
+    this.durations[label] = (this.durations[label] || 0) + duration;
+    return duration;
+  },
+  
+  reset() {
+    this.startTimes = {};
+    this.durations = {};
+  },
+  
+  getMetrics() {
+    return {
+      ...this.durations,
+      total: Object.values(this.durations).reduce((a, b) => a + b, 0)
+    };
+  },
+  
+  logMetrics() {
+    console.log("Performance Metrics (ms):");
+    const metrics = this.getMetrics();
+    Object.entries(metrics).forEach(([key, value]) => {
+      console.log(`- ${key}: ${value}ms`);
+    });
   }
 };
 
