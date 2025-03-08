@@ -19,7 +19,7 @@ let specializationInstructionText = "";
 // Initialize PostgreSQL client for Supabase
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-// Dynamic Supabase Function Handler
+// Enhanced Dynamic Supabase Function Handler
 async function dynamicSupabaseOperation(params) {
   try {
     // Validate required parameters
@@ -36,7 +36,72 @@ async function dynamicSupabaseOperation(params) {
       'select': () => {
         // Handle select with optional columns
         const columns = params.columns || '*';
-        return query.select(columns);
+        let selectQuery = query.select(columns);
+        
+        // Apply filters if provided
+        if (params.filters) {
+          params.filters.forEach(filter => {
+            switch(filter.operator) {
+              case 'eq':
+                selectQuery = selectQuery.eq(filter.column, filter.value);
+                break;
+              case 'neq':
+                selectQuery = selectQuery.neq(filter.column, filter.value);
+                break;
+              case 'gt':
+                selectQuery = selectQuery.gt(filter.column, filter.value);
+                break;
+              case 'lt':
+                selectQuery = selectQuery.lt(filter.column, filter.value);
+                break;
+              case 'gte':
+                selectQuery = selectQuery.gte(filter.column, filter.value);
+                break;
+              case 'lte':
+                selectQuery = selectQuery.lte(filter.column, filter.value);
+                break;
+              case 'like':
+                selectQuery = selectQuery.like(filter.column, `%${filter.value}%`);
+                break;
+              case 'ilike':
+                selectQuery = selectQuery.ilike(filter.column, `%${filter.value}%`);
+                break;
+              case 'in':
+                selectQuery = selectQuery.in(filter.column, filter.value);
+                break;
+              case 'contains':
+                // For JSONB fields
+                selectQuery = selectQuery.contains(filter.column, filter.value);
+                break;
+              case 'range':
+                // For date ranges
+                selectQuery = selectQuery.gte(filter.column, filter.value[0])
+                                        .lte(filter.column, filter.value[1]);
+                break;
+              default:
+                throw new Error(`Unsupported filter operator: ${filter.operator}`);
+            }
+          });
+        }
+        
+        // Apply ordering if provided
+        if (params.order) {
+          params.order.forEach(order => {
+            selectQuery = selectQuery.order(order.column, { ascending: order.ascending });
+          });
+        }
+        
+        // Apply pagination if provided
+        if (params.pagination) {
+          if (params.pagination.limit) {
+            selectQuery = selectQuery.limit(params.pagination.limit);
+          }
+          if (params.pagination.offset) {
+            selectQuery = selectQuery.offset(params.pagination.offset);
+          }
+        }
+        
+        return selectQuery;
       },
       'insert': () => {
         // Handle single or multiple inserts
@@ -46,58 +111,159 @@ async function dynamicSupabaseOperation(params) {
       'update': () => {
         // Handle update with conditions
         const updateData = params.data;
-
+        let updateQuery = query.update(updateData);
+        
         // Apply conditions
-        if (params.conditions) {
-          params.conditions.forEach(condition => {
-            switch(condition.evaluation) {
+        if (params.filters) {
+          params.filters.forEach(filter => {
+            switch(filter.operator) {
               case 'eq':
-                queryResult = query.update().eq(condition.value[0], condition.value[1]);
+                updateQuery = updateQuery.eq(filter.column, filter.value);
                 break;
               case 'neq':
-                queryResult = query.update().neq(condition.value[0], condition.value[1]);
-                break;
-              case 'gt':
-                queryResult = query.update().gt(condition.value[0], condition.value[1]);
-                break;
-              case 'lt':
-                queryResult = query.update().lt(condition.value[0], condition.value[1]);
+                updateQuery = updateQuery.neq(filter.column, filter.value);
                 break;
               case 'in':
-                queryResult = query.update().in(condition.value[0], condition.value[1]);
+                updateQuery = updateQuery.in(filter.column, filter.value);
                 break;
+              // Add other operators as needed
               default:
-                throw new Error(`Unsupported condition: ${condition.evaluation}`);
+                throw new Error(`Unsupported filter operator: ${filter.operator}`);
             }
           });
         }
-
-        return queryResult;
+        
+        return updateQuery;
       },
       'delete': () => {
         // Handle delete with conditions
-        if (params.conditions) {
-          params.conditions.forEach(condition => {
-            switch(condition.evaluation) {
+        let deleteQuery = query.delete();
+        
+        if (params.filters) {
+          params.filters.forEach(filter => {
+            switch(filter.operator) {
               case 'eq':
-                queryResult = query.delete().eq(condition.value[0], condition.value[1]);
+                deleteQuery = deleteQuery.eq(filter.column, filter.value);
                 break;
               case 'in':
-                queryResult = query.delete().in(condition.value[0], condition.value[1]);
+                deleteQuery = deleteQuery.in(filter.column, filter.value);
                 break;
+              // Add other operators as needed
               default:
-                throw new Error(`Unsupported condition: ${condition.evaluation}`);
+                throw new Error(`Unsupported filter operator: ${filter.operator}`);
             }
           });
         }
-
-        return queryResult;
+        
+        return deleteQuery;
       },
       'upsert': () => {
         // Handle upsert with optional conflict resolution
         const data = params.data;
         const options = params.options || {};
         return query.upsert(data, options);
+      },
+      'join': () => {
+        // New action: handle joins between tables
+        if (!params.join) {
+          throw new Error('Missing join parameters for join action');
+        }
+        
+        // Base table is specified by params.from
+        // Get columns from base table
+        const baseColumns = params.baseColumns || '*';
+        
+        // Start with selecting from base table
+        let joinQuery = query.select(baseColumns);
+        
+        // For each join table
+        params.join.forEach(joinSpec => {
+          // Validate join specification
+          if (!joinSpec.table || !joinSpec.on) {
+            throw new Error('Join specification missing table or on clause');
+          }
+          
+          // Create the foreign key - we need to format it as "foreign_table(foreign_column)"
+          const foreignKey = `${joinSpec.table}(${joinSpec.on.foreign})`;
+          
+          // Add columns from the joined table (with optional alias prefixing)
+          const joinedColumns = joinSpec.columns || '*';
+          let formattedColumns;
+          
+          if (joinSpec.columnPrefix) {
+            // If a prefix is specified, add it to each column name
+            if (joinedColumns === '*') {
+              // Can't prefix '*', so we need to specify columns
+              throw new Error('Cannot use "*" with columnPrefix. Please specify columns explicitly.');
+            }
+            formattedColumns = joinedColumns.split(',').map(col => 
+              `${col.trim()}:${joinSpec.columnPrefix}${col.trim()}`
+            ).join(',');
+          } else {
+            formattedColumns = joinedColumns;
+          }
+          
+          // Perform the join
+          joinQuery = joinQuery.select(formattedColumns, { foreignTable: joinSpec.table });
+          
+          // Set up the join condition
+          const joinType = joinSpec.type || 'inner'; // default to inner join
+          switch(joinType.toLowerCase()) {
+            case 'inner':
+              joinQuery = joinQuery.eq(joinSpec.on.local, foreignKey);
+              break;
+            case 'left':
+              joinQuery = joinQuery.or(`${joinSpec.on.local}.eq.${foreignKey},${joinSpec.on.local}.is.null`);
+              break;
+            default:
+              throw new Error(`Unsupported join type: ${joinType}`);
+          }
+        });
+        
+        // Apply additional filters if provided
+        if (params.filters) {
+          params.filters.forEach(filter => {
+            switch(filter.operator) {
+              case 'eq':
+                joinQuery = joinQuery.eq(filter.column, filter.value);
+                break;
+              // Add other operators as needed
+              default:
+                throw new Error(`Unsupported filter operator: ${filter.operator}`);
+            }
+          });
+        }
+        
+        return joinQuery;
+      },
+      'search': () => {
+        // New action: full-text search across fields
+        if (!params.searchTerm) {
+          throw new Error('Missing searchTerm parameter for search action');
+        }
+        
+        // Columns to search in
+        const searchColumns = params.searchColumns || ['title', 'description', 'content'];
+        
+        // Create a query with OR conditions for each column
+        let firstColumn = true;
+        let searchQuery;
+        
+        searchColumns.forEach(column => {
+          if (firstColumn) {
+            searchQuery = query.ilike(column, `%${params.searchTerm}%`);
+            firstColumn = false;
+          } else {
+            searchQuery = searchQuery.or(`${column}.ilike.%${params.searchTerm}%`);
+          }
+        });
+        
+        // Select specific columns if requested
+        if (params.columns && params.columns !== '*') {
+          searchQuery = searchQuery.select(params.columns);
+        }
+        
+        return searchQuery;
       }
     };
 
@@ -183,7 +349,8 @@ async function setSpecialization(params) {
 
 // Base instructions prompt that explains response format to the LLM
 const getInstructionsPrompt = (specialization = null) => {
-  let baseInstructions = `- You are a helpful assistant that responds in JSON format.
+  let baseInstructions = `- You are an essential member of an AI agent workflow
+  that performs tasks to help answer a user query, and responds in JSON format.
 - Your responses must be valid JSON without any code block wrappers.
 - Your responses will be used programatically by an AI agent, so the format of the 
    response is important.
@@ -270,19 +437,25 @@ Function usage:
           "action": "select|insert|update|delete|upsert", // Required: type of operation
           "columns": "column1, column2", // Optional string for select with comma separated column names
           "data": {}, // Data required for insert/update/upsert
-          "conditions": [{"evaluation": "condition type", "value": ["column name","value"]}], // Optional filtering conditions 
+          "filters": [{"column": "column_name", "operator": "operator_type","value": "column_value"}], // Optional filtering conditions 
         },
       }
     ]
    }
    
-   Condition Types:
+   Operator Types:
    - "eq": Equal to
    - "neq": Not equal to
    - "gt": Greater than
    - "lt": Less than
    - "in": Matches any value in a list
-   
+   - "gte": 
+   - "lte": 
+   - "like": 
+   - "ilike": 
+   - "contains": 
+   - "range": 
+
    Example Operations:
    Example 1. User query requires agent to retrieve active to-do and shopping items:
    {
@@ -296,7 +469,7 @@ Function usage:
          "parameters": {
            "from": "todo_list",
            "action": "select",
-           "conditions": [{"evaluation": "eq", "value": ["status", "active"]}],
+           "filters": [{"column": "status", "operator": "eq", "value": "active"}],
            "columns": "id, description"
          }
        },
@@ -305,7 +478,7 @@ Function usage:
         "parameters": {
           "from": "shopping_list",
           "action": "select",
-          "conditions": [{"evaluation": "eq", "value": ["status", "active"]}],
+          "filters": [{"column": "status", "operator": "eq", "value": "active"}],
           "columns": "id, description"
         }
        }
@@ -323,7 +496,7 @@ Function usage:
          "parameters": {
            "from": "todo_list",
            "action": "update",
-           "conditions": [{"evaluation": "eq", "value": ["id", 1]}],
+           "filters": [{"column": "id", "operator": "eq", "value": 1}],
            "data": {"status": "completed"}
          }  
        },
