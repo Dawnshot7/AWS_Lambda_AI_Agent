@@ -10,7 +10,9 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 // Available functions mapping
 const functionMap = {
   dynamicSupabaseOperation: dynamicSupabaseOperation,
-  setSpecialization: setSpecialization
+  setSpecialization: setSpecialization,
+  synthesizeKnowledge: synthesizeKnowledge,
+  retrieveRelevantKnowledge: retrieveRelevantKnowledge
 };
 
 let currentSpecialization = null;
@@ -346,6 +348,215 @@ async function setSpecialization(params) {
   }
 }
 
+// Knowledge Synthesis Function
+async function synthesizeKnowledge(params) {
+  try {
+    // Validate required parameters
+    if (!params.topic || !params.content) {
+      throw new Error('Missing required parameters: "topic" and "content"');
+    }
+
+    // Check if a similar knowledge snippet already exists
+    const { data: existingSnippets, error: searchError } = await supabase
+      .from('knowledge_snippets')
+      .select('*')
+      .ilike('topic', `%${params.topic}%`)
+      .limit(5);
+
+    if (searchError) {
+      console.error('Error searching for existing knowledge:', searchError);
+      return {
+        success: false,
+        error: searchError.message
+      };
+    }
+
+    // Decide whether to update existing knowledge or create new
+    let operation;
+    let operationData;
+    
+    if (existingSnippets && existingSnippets.length > 0) {
+      // We found similar knowledge - update the closest match
+      // In a more advanced implementation, you might use semantic similarity here
+      
+      const mostRelevantSnippet = existingSnippets[0];
+      
+      operationData = {
+        id: mostRelevantSnippet.id,
+        last_updated: new Date().toISOString(),
+        content: params.content,
+        confidence: params.confidence || 0.7,
+        // Merge related entities if provided
+        related_entities: params.related_entities 
+          ? { ...mostRelevantSnippet.related_entities, ...params.related_entities }
+          : mostRelevantSnippet.related_entities
+      };
+      
+      operation = supabase
+        .from('knowledge_snippets')
+        .update(operationData)
+        .eq('id', mostRelevantSnippet.id);
+        
+    } else {
+      // Create new knowledge snippet
+      operationData = {
+        topic: params.topic,
+        content: params.content,
+        source: params.source || 'user_interaction',
+        confidence: params.confidence || 0.7,
+        related_entities: params.related_entities || {}
+      };
+      
+      operation = supabase
+        .from('knowledge_snippets')
+        .insert(operationData);
+    }
+
+    // Execute the operation
+    const { data, error } = await operation;
+
+    // Handle potential errors
+    if (error) {
+      console.error('Knowledge Synthesis Error:', error);
+      return { 
+        success: false, 
+        error: error.message 
+      };
+    }
+
+    // Log the interaction
+    await supabase
+      .from('interactions')
+      .insert({
+        query: params.sourceQuery || 'knowledge synthesis',
+        response: 'knowledge updated',
+        knowledge_updated: {
+          topic: params.topic,
+          operation: existingSnippets && existingSnippets.length > 0 ? 'update' : 'insert'
+        }
+      });
+
+    // Return successful result
+    return { 
+      success: true, 
+      data: {
+        message: existingSnippets && existingSnippets.length > 0 
+          ? 'Existing knowledge updated' 
+          : 'New knowledge created',
+        knowledge: operationData
+      }
+    };
+  } catch (error) {
+    console.error('Knowledge Synthesis Error:', error);
+    return { 
+      success: false, 
+      error: error.message 
+    };
+  }
+}
+
+// Knowledge Retrieval Function
+async function retrieveRelevantKnowledge(params) {
+  try {
+    // Validate required parameters
+    if (!params.query) {
+      throw new Error('Missing required parameter: "query"');
+    }
+
+    // Extract keywords from the query
+    // This is a simple approach - in production you might use NLP or embeddings
+    const queryWords = params.query.toLowerCase()
+      .replace(/[^\w\s]/g, '')
+      .split(/\s+/)
+      .filter(word => word.length > 3); // Filter out short words
+
+    // If no meaningful keywords found, return empty
+    if (queryWords.length === 0) {
+      return {
+        success: true,
+        data: []
+      };
+    }
+
+    // Build a query to find relevant knowledge
+    let knowledgeQuery = supabase
+      .from('knowledge_snippets')
+      .select('*');
+
+    // Search for each keyword with OR condition
+    queryWords.forEach((word, index) => {
+      if (index === 0) {
+        knowledgeQuery = knowledgeQuery.ilike('topic', `%${word}%`);
+      } else {
+        knowledgeQuery = knowledgeQuery.or(`topic.ilike.%${word}%,content.ilike.%${word}%`);
+      }
+    });
+
+    // Execute the query
+    const { data, error } = await knowledgeQuery;
+
+    // Handle potential errors
+    if (error) {
+      console.error('Knowledge Retrieval Error:', error);
+      return { 
+        success: false, 
+        error: error.message 
+      };
+    }
+
+    // Sort by relevance (we'll use a simple heuristic here)
+    const scoredResults = data.map(snippet => {
+      let score = 0;
+      
+      // Score based on keyword matches in topic
+      queryWords.forEach(word => {
+        if (snippet.topic.toLowerCase().includes(word)) {
+          score += 3; // Higher weight for topic matches
+        }
+        if (snippet.content.toLowerCase().includes(word)) {
+          score += 1; // Lower weight for content matches
+        }
+      });
+      
+      // Adjust score by confidence
+      score *= snippet.confidence;
+      
+      return {
+        ...snippet,
+        relevance_score: score
+      };
+    });
+
+    // Sort by score and limit results
+    const sortedResults = scoredResults
+      .sort((a, b) => b.relevance_score - a.relevance_score)
+      .slice(0, params.limit || 5);
+
+    // Log the retrieval in interactions
+    await supabase
+      .from('interactions')
+      .insert({
+        query: params.query,
+        response: 'knowledge retrieved',
+        context_retrieved: {
+          snippets_count: sortedResults.length,
+          top_topic: sortedResults.length > 0 ? sortedResults[0].topic : null
+        }
+      });
+
+    // Return successful result
+    return { 
+      success: true, 
+      data: sortedResults
+    };
+  } catch (error) {
+    console.error('Knowledge Retrieval Error:', error);
+    return { 
+      success: false, 
+      error: error.message 
+    };
+  }
+}
 
 // Base instructions prompt that explains response format to the LLM
 const getInstructionsPrompt = (specialization = null) => {
@@ -437,7 +648,7 @@ Function usage:
           "action": "select|insert|update|delete|upsert", // Required: type of operation
           "columns": "column1, column2", // Optional string for select with comma separated column names
           "data": {}, // Data required for insert/update/upsert
-          "filters": [{"column": "column_name", "operator": "operator_type","value": "column_value"}], // Optional filtering conditions 
+          "filters": [{"column": "column_name", "operator": "operator_type","value": "column_value"}], // Optional filtering conditions, all filters are applied simultaneously and all conditions must be met 
         },
       }
     ]
@@ -449,12 +660,12 @@ Function usage:
    - "gt": Greater than
    - "lt": Less than
    - "in": Matches any value in a list
-   - "gte": 
-   - "lte": 
-   - "like": 
-   - "ilike": 
-   - "contains": 
-   - "range": 
+   - "gte" 
+   - "lte" 
+   - "like" 
+   - "ilike" 
+   - "contains" 
+   - "range" 
 
    Example Operations:
    Example 1. User query requires agent to retrieve active to-do and shopping items:
@@ -550,16 +761,15 @@ Function name: setSpecialization
 
 Additional instructions for all functions:
     - If the user requests to delete or modify a list item based on it's 'description' you must
-      first select the full list and read all of the descriptions to find the ID of the matching
-      item. This means you cannot complete the deletion or modification in this chat completion. 
-      You must use RAG to get the list values and pass this back to the agent along with your 
-      reasonining which includes next steps.
-    - Do not add items to a list if they are already on the list, and do not delete items if they
-      are not found in the list after first using 'select'.
-    - Always call the function dynamicSupabaseOperation with the action 'select' at the end of the list 
-      of function_calls to retrieve the table after any modifications have been made to verify success.
-      The user will be notified of success after the agent performs the function calls and returns the
-      results to a new LLM chat completion to verify. 
+      first select the full list and read all of the descriptions to find the matching
+      item. This means you cannot complete the deletion or modification in this chat completion,
+      and must first use the 'select' action. 
+    - Do not add items to a list if they are already on the list. Check first using 'select'.
+    - Always call the function dynamicSupabaseOperation with the action 'select' at the end of a list 
+      of database modification function_calls to retrieve the table after any modifications have been made, in order to verify success. 
+    - Always call setSpecialization last in every set of function_calls except when the 'answer' parameter is populated.
+    - Do not call setSpecialization if you have the answer ready to give to the user, just populate the 
+      'answer' parameter and leave the functions list empty.
  
 Remember: Your whole response must be valid JSON without any code tags
 `;
@@ -716,9 +926,8 @@ async function executeFunctions(functionCalls) {
             data: result.data || result,
             error: result.error || null
         };
-        if (functionName != "setSpecialization"){
-          results.push(functionResult);
-        }
+        results.push(functionResult);
+       
         console.log(`Function ${functionName} completed successfully`);
     } catch (error) {
         console.error(`Error executing function ${functionName}:`, error);
@@ -733,7 +942,7 @@ async function executeFunctions(functionCalls) {
   }
 
   // Combine all results into a single string
-  let readableResults = "Function Results:\n";
+  let readableResults = "";
   results.forEach((result, index) => {
     const functionName = result.functionName;
     const paramString = JSON.stringify(result.parameters);
@@ -775,7 +984,7 @@ async function runAIAgent(userPrompt) {
   let conversationHistory = [`\nCONVERSATION HISTORY ROLE: USER\n\nUser query:\n${userPrompt}\n`];
   
   // Maximum number of iterations to prevent infinite loops
-  const MAX_ITERATIONS = 3;
+  const MAX_ITERATIONS = 5;
   let iterations = 0;
   let functionsResult = null;   
 
@@ -818,9 +1027,10 @@ async function runAIAgent(userPrompt) {
       console.log(`Results:`, functionsResult);
 
       // Add the function call and result to the conversation history, removing backslashes
-      conversationHistory.push(`\nCONVERSATION HISTORY ROLE: LLM\n\nCalling function list:\n${JSON.stringify(aiResponse.function_calls)}. \n\nReasoning: ${aiResponse.reasoning}\n`);
+      // conversationHistory.push(`\nCONVERSATION HISTORY ROLE: LLM\n\nCalling function list:\n${JSON.stringify(aiResponse.function_calls)}. \n\nReasoning: ${aiResponse.reasoning}\n`);
+      conversationHistory.push(`\nCONVERSATION HISTORY ROLE: LLM - ${currentSpecialization}\n\nReasoning: ${aiResponse.reasoning}\n\n${functionsResult}\n`);
 
-      conversationHistory.push(`\nCONVERSATION HISTORY ROLE: FUNCTION\n\nFunction results:\n${functionsResult}\n`);
+      // conversationHistory.push(`\nCONVERSATION HISTORY ROLE: FUNCTION\n\nFunction results:\n${functionsResult}\n`);
       
       // Continue the loop with the function result
       continue;
