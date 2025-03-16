@@ -15,7 +15,7 @@ const functionMap = {
   retrieveRelevantKnowledge: retrieveRelevantKnowledge
 };
 
-let currentSpecialization = null;
+let currentSpecialization = 'secretary';
 let specializationInstructionText = "";
 
 // Initialize PostgreSQL client for Supabase
@@ -41,49 +41,47 @@ async function dynamicSupabaseOperation(params) {
         let selectQuery = query.select(columns);
         
         // Apply filters if provided
-        if (params.filters) {
-          params.filters.forEach(filter => {
-            switch(filter.operator) {
-              case 'eq':
-                selectQuery = selectQuery.eq(filter.column, filter.value);
-                break;
-              case 'neq':
-                selectQuery = selectQuery.neq(filter.column, filter.value);
-                break;
-              case 'gt':
-                selectQuery = selectQuery.gt(filter.column, filter.value);
-                break;
-              case 'lt':
-                selectQuery = selectQuery.lt(filter.column, filter.value);
-                break;
-              case 'gte':
-                selectQuery = selectQuery.gte(filter.column, filter.value);
-                break;
-              case 'lte':
-                selectQuery = selectQuery.lte(filter.column, filter.value);
-                break;
-              case 'like':
-                selectQuery = selectQuery.like(filter.column, `%${filter.value}%`);
-                break;
-              case 'ilike':
-                selectQuery = selectQuery.ilike(filter.column, `%${filter.value}%`);
-                break;
-              case 'in':
-                selectQuery = selectQuery.in(filter.column, filter.value);
-                break;
-              case 'contains':
-                // For JSONB fields
-                selectQuery = selectQuery.contains(filter.column, filter.value);
-                break;
-              case 'range':
-                // For date ranges
-                selectQuery = selectQuery.gte(filter.column, filter.value[0])
-                                        .lte(filter.column, filter.value[1]);
-                break;
-              default:
-                throw new Error(`Unsupported filter operator: ${filter.operator}`);
-            }
-          });
+        if (params.filter) {
+          switch(filter.operator) {
+            case 'eq':
+              selectQuery = selectQuery.eq(params.filter.column, params.filter.value);
+              break;
+            case 'neq':
+              selectQuery = selectQuery.neq(params.filter.column, params.filter.value);
+              break;
+            case 'gt':
+              selectQuery = selectQuery.gt(params.filter.column, params.filter.value);
+              break;
+            case 'lt':
+              selectQuery = selectQuery.lt(params.filter.column, params.filter.value);
+              break;
+            case 'gte':
+              selectQuery = selectQuery.gte(params.filter.column, params.filter.value);
+              break;
+            case 'lte':
+              selectQuery = selectQuery.lte(params.filter.column, params.filter.value);
+              break;
+            case 'like':
+              selectQuery = selectQuery.like(params.filter.column, `%${params.filter.value}%`);
+              break;
+            case 'ilike':
+              selectQuery = selectQuery.ilike(params.filter.column, `%${params.filter.value}%`);
+              break;
+            case 'in':
+              selectQuery = selectQuery.in(params.filter.column, params.filter.value);
+              break;
+            case 'contains':
+              // For JSONB fields
+              selectQuery = selectQuery.contains(params.filter.column, params.filter.value);
+              break;
+            case 'range':
+              // For date ranges
+              selectQuery = selectQuery.gte(params.filter.column, params.filter.value[0])
+                                      .lte(params.filter.column, params.filter.value[1]);
+              break;
+            default:
+              throw new Error(`Unsupported filter operator: ${params.filter.operator}`);
+          }
         }
         
         // Apply ordering if provided
@@ -116,23 +114,21 @@ async function dynamicSupabaseOperation(params) {
         let updateQuery = query.update(updateData);
         
         // Apply conditions
-        if (params.filters) {
-          params.filters.forEach(filter => {
-            switch(filter.operator) {
-              case 'eq':
-                updateQuery = updateQuery.eq(filter.column, filter.value);
-                break;
-              case 'neq':
-                updateQuery = updateQuery.neq(filter.column, filter.value);
-                break;
-              case 'in':
-                updateQuery = updateQuery.in(filter.column, filter.value);
-                break;
-              // Add other operators as needed
-              default:
-                throw new Error(`Unsupported filter operator: ${filter.operator}`);
-            }
-          });
+        if (params.filter) {
+          switch(params.filter.operator) {
+            case 'eq':
+              updateQuery = updateQuery.eq(params.filter.column, params.filter.value);
+              break;
+            case 'neq':
+              updateQuery = updateQuery.neq(params.filter.column, params.filter.value);
+              break;
+            case 'in':
+              updateQuery = updateQuery.in(params.filter.column, params.filter.value);
+              break;
+            // Add other operators as needed
+            default:
+              throw new Error(`Unsupported filter operator: ${params.filter.operator}`);
+          }
         }
         
         return updateQuery;
@@ -141,20 +137,18 @@ async function dynamicSupabaseOperation(params) {
         // Handle delete with conditions
         let deleteQuery = query.delete();
         
-        if (params.filters) {
-          params.filters.forEach(filter => {
-            switch(filter.operator) {
-              case 'eq':
-                deleteQuery = deleteQuery.eq(filter.column, filter.value);
-                break;
-              case 'in':
-                deleteQuery = deleteQuery.in(filter.column, filter.value);
-                break;
-              // Add other operators as needed
-              default:
-                throw new Error(`Unsupported filter operator: ${filter.operator}`);
-            }
-          });
+        if (params.filter) {
+          switch(params.filter.operator) {
+            case 'eq':
+              deleteQuery = deleteQuery.eq(params.filter.column, params.filter.value);
+              break;
+            case 'in':
+              deleteQuery = deleteQuery.in(params.filter.column, params.filter.value);
+              break;
+            // Add other operators as needed
+            default:
+              throw new Error(`Unsupported filter operator: ${params.filter.operator}`);
+          }
         }
         
         return deleteQuery;
@@ -223,17 +217,15 @@ async function dynamicSupabaseOperation(params) {
         });
         
         // Apply additional filters if provided
-        if (params.filters) {
-          params.filters.forEach(filter => {
-            switch(filter.operator) {
-              case 'eq':
-                joinQuery = joinQuery.eq(filter.column, filter.value);
-                break;
-              // Add other operators as needed
-              default:
-                throw new Error(`Unsupported filter operator: ${filter.operator}`);
-            }
-          });
+        if (params.filter) {
+          switch(params.filter.operator) {
+            case 'eq':
+              joinQuery = joinQuery.eq(params.filter.column, params.filter.value);
+              break;
+            // Add other operators as needed
+            default:
+              throw new Error(`Unsupported filter operator: ${params.filter.operator}`);
+          }
         }
         
         return joinQuery;
@@ -455,7 +447,7 @@ async function synthesizeKnowledge(params) {
   }
 }
 
-// Knowledge Retrieval Function
+// Knowledge Retrieval Function using Supabase PostgreSQL function
 async function retrieveRelevantKnowledge(params) {
   try {
     // Validate required parameters
@@ -464,8 +456,7 @@ async function retrieveRelevantKnowledge(params) {
     }
 
     // Extract keywords from the query
-    // This is a simple approach - in production you might use NLP or embeddings
-    const queryWords = params.query.toLowerCase()
+    const queryWords = params.query
       .replace(/[^\w\s]/g, '')
       .split(/\s+/)
       .filter(word => word.length > 3); // Filter out short words
@@ -478,22 +469,12 @@ async function retrieveRelevantKnowledge(params) {
       };
     }
 
-    // Build a query to find relevant knowledge
-    let knowledgeQuery = supabase
-      .from('knowledge_snippets')
-      .select('*');
-
-    // Search for each keyword with OR condition
-    queryWords.forEach((word, index) => {
-      if (index === 0) {
-        knowledgeQuery = knowledgeQuery.ilike('topic', `%${word}%`);
-      } else {
-        knowledgeQuery = knowledgeQuery.or(`topic.ilike.%${word}%,content.ilike.%${word}%`);
-      }
-    });
-
-    // Execute the query
-    const { data, error } = await knowledgeQuery;
+    // Call the PostgreSQL function via RPC
+    const { data, error } = await supabase
+      .rpc('search_knowledge_snippets', {
+        search_terms: queryWords,
+        results_limit: params.limit || 50
+      });
 
     // Handle potential errors
     if (error) {
@@ -504,50 +485,13 @@ async function retrieveRelevantKnowledge(params) {
       };
     }
 
-    // Sort by relevance (we'll use a simple heuristic here)
-    const scoredResults = data.map(snippet => {
-      let score = 0;
-      
-      // Score based on keyword matches in topic
-      queryWords.forEach(word => {
-        if (snippet.topic.toLowerCase().includes(word)) {
-          score += 3; // Higher weight for topic matches
-        }
-        if (snippet.content.toLowerCase().includes(word)) {
-          score += 1; // Lower weight for content matches
-        }
-      });
-      
-      // Adjust score by confidence
-      score *= snippet.confidence;
-      
-      return {
-        ...snippet,
-        relevance_score: score
-      };
-    });
-
-    // Sort by score and limit results
-    const sortedResults = scoredResults
-      .sort((a, b) => b.relevance_score - a.relevance_score)
-      .slice(0, params.limit || 5);
-
-    // Log the retrieval in interactions
-    await supabase
-      .from('interactions')
-      .insert({
-        query: params.query,
-        response: 'knowledge retrieved',
-        context_retrieved: {
-          snippets_count: sortedResults.length,
-          top_topic: sortedResults.length > 0 ? sortedResults[0].topic : null
-        }
-      });
+    // The data is already sorted and scored by the PostgreSQL function
+    // No need for additional scoring or sorting
 
     // Return successful result
-    return { 
-      success: true, 
-      data: sortedResults
+    return {
+      success: true,
+      data: data
     };
   } catch (error) {
     console.error('Knowledge Retrieval Error:', error);
@@ -560,225 +504,196 @@ async function retrieveRelevantKnowledge(params) {
 
 // Base instructions prompt that explains response format to the LLM
 const getInstructionsPrompt = (specialization = null) => {
-  let baseInstructions = `- You are an essential member of an AI agent workflow
-  that performs tasks to help answer a user query, and responds in JSON format.
-- Your responses must be valid JSON without any code block wrappers.
-- Your responses will be used programatically by an AI agent, so the format of the 
-   response is important.
-- Because you are part of this AI agent, you can utilize functions that can be called 
-   by populating the "function", "parameters", and "reasoning" fields in your structured response.
-- You may need to utilize a data retrieval function to answer a question about information
-   in a database if that information is needed to answer the question.
-- This means you can't provide an answer to the user directly in this chat completion, and
-   another request to an LLM will be made which will include the information that 
-   the function retrieves from the database using the parameters you gave it.
-- This is a multi-step process coordinated programatically by the AI agent, and you may
-   be receiving the intial user query, or you may receive the results data from 
-   function calls along with the conversation history and reasoning.
-- Whether you are receiving the initial user query or function results and a 
-   conversation history will be revealed further below in this system prompt
-   in the section for specializations.
+  let baseInstructions = `AI AGENT SYSTEM INSTRUCTIONS
+  CORE ROLE
+  You are an AI assistant that helps users by performing tasks through function calls. You respond in JSON format and your responses will be used programmatically. 
+  Because you are part of this AI agent, you can utilize functions that can be called by populating the "function", "parameters", and "reasoning" fields in your structured response.
+  
+  RESPONSE FORMAT
+  Your responses must always be valid JSON with this structure:
+  {
+    "answer": "", // Direct answer to the user's question (if available)
+    "reasoning": "", // Your thought process (required when using functions). Be verbose and use the present tense to tell your strategy to the next LLM, including what functions you are calling and why. Do not make any present tense statements about the state of the database that might confuse future LLMs reading the conversation history. Those LLMs need to read the function results for the state of the database.
+    "function_calls": [{"function":"","parameters":""}] // List of functions to call (empty if providing direct answer)
+  }
+  
+  FUNCTION USE INSTRUCTIONS
+  - You may need to utilize a data retrieval function to answer a question about information in a database if that information is needed to answer the question.
+  - This means you can't provide an answer to the user directly in this chat completion, and another request to an LLM will be made which will include the information that the function retrieves from the database using the parameters you gave it.
+  - This is a multi-step process coordinated programatically by the AI agent, and you may be receiving the intial user query, or you may receive the results data from function calls along with the conversation history and reasoning.
+  - Whether you are receiving the initial user query or function results and a conversation history will be revealed further below in this system prompt once you get to the conversation history section.
+  - Only use a function if explicitly needed for tasks.
+  - For questions that need no functions to answer, just provide the answer directly.
+  - For questions that need multiple simultaneous function calls to answer, respond with a list of functions to call and their parameters. 
+  - There can be multiple rounds of multiple simultaneous function calls, and the agent will iteratively provide the information from all previous function calls to new, follow-up LLM chat completions, and those LLM chat completions can request further function calls until an answer to the user query can be generated. 
+  - Do not prompt the user for further information or permission to use functions. 
+  - Assume that you are to infer what functions are needed, use them in batches preferably, or in sequence if needed, and provide an answer to the best of your ability when you have gathered the information needed.
+  - If it looks like the user's request cannot be completed, first try retrieving knowledge snippets using the knowledge retrieval tool.
 
-The JSON of your response should have the following structure:
-{
-  "answer": "The direct answer to the user's question", // Leave empty if a function is being used
-  "reasoning": "", // Overall strategy and rationale for each function use. Leave empty if no function is being used
-  "function_calls": [ // Functions list to be performed sequentially. Leave empty if no function is being used
-    {
-      "function": "", // Name of function 1 to be called. 
-      "parameters": {}, // Each function may require different parameters. 
-    }
-    {
-      "function": "", // Name of function 2 to be called. 
-      "parameters": {}, // Each function may require different parameters. 
-    }
-  ],
-}
+  WORKFLOW PRINCIPLES
+  - First assess what information you need to answer the user's question
+  - Use functions to retrieve or modify data when necessary
+  - Always verify database changes with a follow-up 'select' database operation
+  - Choose the appropriate specialization for the next step
+  
+  AVAILABLE FUNCTIONS
+  1. dynamicSupabaseOperation
+  Description:
+  - This function retrieves or modifies data in a database.
+  
+  Available Database Tables
+  - todo_list - User's current to-do items (id, created_at, description)
+  - shopping_list - User's shopping items (id, created_at, description)
+  
+  Parameters:
+  - from (Required): (String) Table name (todo_list or shopping_list)
+  - action (Required): (String) Operation type (select, insert, update, delete, upsert)
+  - columns (Optional): (String) Comma-separated string of column names for select
+  - data (Optional): (Object) Data object for insert/update/upsert
+  - filter (Optional): (Object) Filter condition. 
+  
+  Filter Structure:
+  {
+    "column": "column_name",
+    "operator": "eq|neq|gt|lt|in|gte|lte",
+    "value": "column_value"
+  }  
+  
+  2. setSpecialization
+  Description:
+  - This function determines which specialization should handle the next step of the process. 
+  - It is important that you call this function with the specialization name as the parameter when you are ready to move on to the next step.
+  - Every set of function calls should also include a call to this function. This, however doesn't apply if you have a final answer and are filling the 'answer' parameter. 
+  - Setting the specialization will extend the instructions text for the next LLM chat completion with specific instructions for it's role in the process of answering the user query. 
+  - Example: Assigning the 'secretary' specialization will provide the next LLM a thorough background on the user's recent history of modifications to their lists, the user's goals and current projects, the user's preferences of how they like their agent to communicate (sense of humor, offering suggestions, etc.), as well as the user's recent history of location data, and functions for scheduling reminders and writing emails. 
+  - This additional specialization data and associated instructions will be added to the next LLM's instructions, and will increase the prompt size.
+  - The specializations have been created so that only chat completions that need extra information receive it in their prompt. 
+  
+  Available Specializations:
+   - secretary - manages user's recent history of modifications to their lists, the user's goals and current projects, the user's preferences of how they like their agent to communicate (sense of humor, offering suggestions, etc.), as well as the user's recent history of location data, and functions for scheduling reminders and writing emails. 
 
-- Only use a function if explicitly needed for tasks.
-- For questions that need no functions to answer, just provide the answer directly.
-- For questions that need multiple simultaneous function calls to answer, respond with a list of 
-   functions to call and their parameters. There can be multiple rounds of multiple simultaneous 
-   function calls, and the agent will iteratively provide the information from all previous 
-   function calls to new, follow-up LLM chat completions, and those LLM chat completions 
-   can request further function calls until an answer to the user query can be generated. 
-- Do not prompt the user for further information or permission to use functions. 
-- Assume that you are to infer what functions are needed, use them in batches preferably, 
-   or in sequence if needed, and provide an answer to the best of your ability when you have 
-   gathered the information needed.
+  Parameters:
+  - specializationName (Required): (String) Specialization name ('secretary|codeAssistant|projectManager')
+  
+  3. retrieveRelevantKnowledge
+  Description:
+  - Knowledge retrieval tool. 
+  - Before providing the final answer to a user query, gather relevant context by using the retrieveRelevantKnowledge function with a search query as the parameter. 
+  - This performs a vector search for knowledge snippets using any 4 or more letter words in your query.
+  - Matches in the topic field are weighted more heavily (3x) than matches in content
+  - Results are adjusted by the confidence score
+  - Results are sorted by relevance score  
+  - Example: If the user asks you to add apples to his shopping list, calling this function may reveal that the user only likes opal apples, and you should add opal apples to their shopping list.
+  - The user keeps his knowledge snippets database updated with preferences for how you should answer questions or perform activities related to specific topics or items.   
+  - Tips for effective searching:
+    * Use specific keywords rather than phrases. 
+    * Use multiple keywords in each search to ensure you don't miss any knowledge that doesn't exactly match your keyword (such as for "School", also search "College University School Education"]). It is better to use more search terms than less.
+    * Try synonyms 
+    * Capitalize the first letter of each keyword (e.g., "Project" not "project")
+  Parameters:
+  - query (Required): Search query
+  - limit (Optional): Maximum results (default: 50)
+  
+  4. synthesizeKnowledge
+  Description:
+  - Knowledge synthesis tool. 
+  - After completing tasks or learning new information about the user, synthesize this knowledge by using the synthesizeKnowledge function to store it for future reference. 
+  - Especially use this function if the user asks you to remember something. 
+  - This knowledge's topic and content will be searchable by future LLMs using retrieveRelevantKnowledge. 
+  - This function either updates existing knowledge or creates new knowledge snippets based on the exact text of your 'topic' field.
+  
+  Parameters:
+  - topic (Required): (String) The main subject of the knowledge. Use searchable keywords.
+  - content (Required): (String) The actual knowledge content. This can be any amount of text. If the user asks for code, make sure it stays within the string without any escape character issues.
+  - source (Optional): (String) Where the knowledge came from (defaults to 'user_interaction'). Alternatively you can be asked by a 'proectManager' specialization to add knowledge to the snippets with source = 'research_data" if you are storing webscraped information for example.
+  - confidence (Optional): (Number) Confidence score from 0-1 (defaults to 0.7. Round to this many digits). 
+  - sourceQuery (Optional): (String) The original query that led to this knowledge update (found in the conversation history section at the end of this system prompt)
+  
+IMPORTANT FUNCTION CALLING AND WORKFLOW RULES
+  - When modifying items by description: First select the full list to find the item ID matching the description. Assume the user query is spelled wrong, and don't apply filters for exact text.
+  - Before adding items: Check if they already exist using select
+  - After any modification: Always verify with a select operation. The operation may have been completed twice or not at all, despite the function returning a status of 'success'. 
+  - Don't apply filters when using select after delete operations in case the item was spelled wrong in the user query. 
+  - Notice and reverse any errors you make from duplicating actions with appropriate follow-up function calls. 
+  - Function order: Call setSpecialization last (except when providing a final answer)
+  - When you have the answer: Fill the "answer" field and leave function_calls empty
+  - Do not call setSpecialization if you have the answer ready to give to the user, just populate the 'answer' parameter and leave the functions list empty.
+  - Use the retrieveRelevantKnowledge() function immediately using a search query that will find any relevant saved information related to the user query.
+  - Do not repeat any steps if an LLM has previously already completed them, and respond to the user with an answer once you have one ready.
 
-Current functions:
-Function 1)
-Function name: dynamicSupabaseOperation
-Function parameters: from, action, columns, data, conditions, options
-Function description: 
-   This function provides a flexible way to interact with the Supabase databases.
-   
-   Available Tables:
-   Table 1) The user's current to-do list
-   - Table name: "todo_list"
-   - Columns: "id", "created_at", "description", "status"
-
-   Table 2) The user's current shopping list
-   - Table name: "shopping_list"
-   - Columns: "id", "created_at", "description", "status"
-
-   Available Actions:
-   - "select": Retrieve data from the database
-   - "insert": Add new data to the database
-   - "update": Modify existing data in the database
-   - "delete": Remove data from the database
-   - "upsert": Insert or update data in the database
-
-Function usage:
-   Detailed Usage Guide:
-   - You can perform SELECT, INSERT, UPDATE, DELETE, and UPSERT operations
-   - Provides a structured way to query and modify database tables
-   - Supports complex conditions and filtering
-   
-   Function Call Structure:
-   {
-     "answer":""
-     "reasoning": "Explain the purpose of the database operation"
-     "function_calls": [
-       {
-        "function": "dynamicSupabaseOperation",
-        "parameters": {
-          "from": "table_name", // Required: specifies the target table
-          "action": "select|insert|update|delete|upsert", // Required: type of operation
-          "columns": "column1, column2", // Optional string for select with comma separated column names
-          "data": {}, // Data required for insert/update/upsert
-          "filters": [{"column": "column_name", "operator": "operator_type","value": "column_value"}], // Optional filtering conditions, all filters are applied simultaneously and all conditions must be met 
-        },
-      }
-    ]
-   }
-   
-   Operator Types:
-   - "eq": Equal to
-   - "neq": Not equal to
-   - "gt": Greater than
-   - "lt": Less than
-   - "in": Matches any value in a list
-   - "gte" 
-   - "lte" 
-   - "like" 
-   - "ilike" 
-   - "contains" 
-   - "range" 
-
-   Example Operations:
-   Example 1. User query requires agent to retrieve active to-do and shopping items:
-   {
-     "answer":""
-     "reasoning": "Calling function dynamicSupabaseOperation with the action 'select' twice, 
-         once to collect the to-do list items, and once to collect the shopping list items, because
-         both will be needed to answer the user query"
-     "function_calls": [
-       {
-         "function": "dynamicSupabaseOperation",
-         "parameters": {
-           "from": "todo_list",
-           "action": "select",
-           "filters": [{"column": "status", "operator": "eq", "value": "active"}],
-           "columns": "id, description"
-         }
-       },
-       {
+  Workflow Example
+  - User query: "Add apples to my shopping list"
+  - Step 1: Initial assessment, retrieving knowledge snippets, and setting specialization
+  {
+    "answer": "",
+    "reasoning": "Need to check if apples are already on the list and retrieve any relevant user knowledge",
+    "function_calls": [
+      {
         "function": "dynamicSupabaseOperation",
         "parameters": {
           "from": "shopping_list",
           "action": "select",
-          "filters": [{"column": "status", "operator": "eq", "value": "active"}],
           "columns": "id, description"
         }
-       }
-     ],
-   }
-   
-   Example 2. Update task status given the id of the list item:
-   {
-     "answer":""
-     "reasoning": "The user provided the id of the item on his to-do list to be marked as completed so
-        I will call function dynamicSupabaseOperation with the action 'update' using this ID. I then call
-        the same function with action 'select' to verify that the list item has been updated."
-     "function_calls": [{
-         "function": "dynamicSupabaseOperation",
-         "parameters": {
-           "from": "todo_list",
-           "action": "update",
-           "filters": [{"column": "id", "operator": "eq", "value": 1}],
-           "data": {"status": "completed"}
-         }  
-       },
-       {
-        "function": "dynamicSupabaseOperation",
+      },
+      {
+        "function": "retrieveRelevantKnowledge",
         "parameters": {
-          "from": "todo_list",
-          "action": "select",
-          "columns": "id, status"
+          "query": "Apples Shopping List"
         }
       },
-     ],
-   }
- 
-Function 2)
-Function name: setSpecialization
-  Function parameters: specializationName
-  Function description:
-    This function determines which specialization should handle the next step of the process.
-    Every set of function calls should also include a call to this function, or the 
-    specialization will be set to 'router' for the next step in this agentic chain. This,
-    however doesn't apply if you have a final answer and are filling the 'answer' parameter.
-    Setting the specialization will extend the instructions text for the next LLM chat
-    completion with specific instructions for it's role in the process of answering the user
-    query. For instance, assigning the 'secretary' specialization will provide the next
-    LLM a thorough background on the user's recent history of modifications to their lists,
-    the user's goals and current projects, the user's preferences of how they like their agent to
-    communicate (sense of humor, offering suggestions, etc.), as well as the user's recent
-    history of location data, and functions for scheduling reminders and writing emails. This
-    additional instruction text will be added to the next LLM's instructions, and will increase
-    the prompt size, so the specializations have been divided up so that only chat completions
-    that need extra information and functions receive it in their prompt. 
-    
-    Available Specializations:
-    - "router" - Initial request router (default)
-    - "secretary" - Manages to-do and shopping lists
-    - "codeAssistant" - Helps with code and development tasks
-    - "projectManager" - Coordinates complex multi-step tasks
-    
-  Function usage:
-    {
-      "answer":"",
-      "reasoning": "Include in your overall reasoning an explanation why this specialization is most appropriate",
-      "function_calls": [{
+      {
         "function": "setSpecialization",
         "parameters": {
-          "specializationName": "specialization_name" // Required: name of the specialization
+          "specializationName": "secretary"
         }
-      }]
-    }
-
-Additional instructions for all functions:
-    - If the user requests to delete or modify a list item based on it's 'description' you must
-      first select the full list and read all of the descriptions to find the matching
-      item. This means you cannot complete the deletion or modification in this chat completion,
-      and must first use the 'select' action. 
-    - Do not add items to a list if they are already on the list. Check first using 'select'.
-    - Always call the function dynamicSupabaseOperation with the action 'select' at the end of a list 
-      of database modification function_calls to retrieve the table after any modifications have been made, in order to verify success. 
-    - Always call setSpecialization last in every set of function_calls except when the 'answer' parameter is populated.
-    - Do not call setSpecialization if you have the answer ready to give to the user, just populate the 
-      'answer' parameter and leave the functions list empty.
- 
-Remember: Your whole response must be valid JSON without any code tags
+      }
+    ]
+  }
+  - Step 2: Add Item to database (If Not Already Present) and setting specialization
+  {
+    "answer": "",
+    "reasoning": "Apples not found on list, adding the item and verifying",
+    "function_calls": [
+      {
+        "function": "dynamicSupabaseOperation",
+        "parameters": {
+          "from": "shopping_list",
+          "action": "insert",
+          "data": {
+            "description": "Apples"
+          }
+        }
+      },
+      {
+        "function": "dynamicSupabaseOperation",
+        "parameters": {
+          "from": "shopping_list",
+          "action": "select",
+          "columns": "id, description"
+        }
+      },
+      {
+        "function": "setSpecialization",
+        "parameters": {
+          "specializationName": "secretary"
+        }
+      }
+    ]
+  }
+  - Step 3: Final Response
+  {
+    "answer": "I've added apples to your shopping list.",
+    "reasoning": "",
+    "function_calls": []
+  }
 `;
   
   // If we have a specialization, include its instructions
-  if (specialization) {
-    baseInstructions = `${baseInstructions}\n\n--- You have been assigned as SPECIALIZATION: ${currentSpecialization} 
-    ---\nThe following are instructions specific for your specialization:\n\n SPECIALIZATION INSTRUCTIONS: ${specializationInstructionText}`;
-  }
+  //if (specialization) {
+  //  baseInstructions = `${baseInstructions}\n\n--- You have been assigned as SPECIALIZATION: ${currentSpecialization} 
+  //  ---\nThe following are instructions specific for your specialization:\n\n SPECIALIZATION INSTRUCTIONS: ${specializationInstructionText}`;
+  //}
 
    return baseInstructions;
 }
@@ -803,12 +718,14 @@ async function makeAIRequest(messages) {
           "X-Title": "Your Website Name",
         },
         body: JSON.stringify({
-          model: "deepseek/deepseek-r1-distill-llama-70b:free",
+          model: "google/gemini-2.0-flash-lite-preview-02-05:free",
           messages: messages,
           temperature: 0.2,
         }),
       });
-
+      // "deepseek/deepseek-r1:free"
+      // "deepseek/deepseek-r1-distill-llama-70b:free"
+      // "google/gemini-2.0-flash-lite-preview-02-05:free"
       const data = await response.json();
       
       // Extract the message content
@@ -1022,13 +939,18 @@ async function runAIAgent(userPrompt) {
     
     // Check if we need to call a function
     if (aiResponse.function_calls && aiResponse.function_calls.length > 0) {
+      if (!currentSpecialization) {
+        currentSpecialization = "router";
+      }
+      conversationHistory.push(`\nCONVERSATION HISTORY ROLE: LLM - ${currentSpecialization}\n`);
+
       // Execute the requested function
       functionsResult = await executeFunctions(aiResponse.function_calls);
       console.log(`Results:`, functionsResult);
 
       // Add the function call and result to the conversation history, removing backslashes
       // conversationHistory.push(`\nCONVERSATION HISTORY ROLE: LLM\n\nCalling function list:\n${JSON.stringify(aiResponse.function_calls)}. \n\nReasoning: ${aiResponse.reasoning}\n`);
-      conversationHistory.push(`\nCONVERSATION HISTORY ROLE: LLM - ${currentSpecialization}\n\nReasoning: ${aiResponse.reasoning}\n\n${functionsResult}\n`);
+      conversationHistory.push(`\nReasoning: ${aiResponse.reasoning}\n\n${functionsResult}\n`);
 
       // conversationHistory.push(`\nCONVERSATION HISTORY ROLE: FUNCTION\n\nFunction results:\n${functionsResult}\n`);
       
@@ -1038,7 +960,7 @@ async function runAIAgent(userPrompt) {
       // No function call, we have the final answer
       
       // Add the final response to conversation history
-      conversationHistory.push(`\nCONVERSATION HISTORY ROLE: LLM\n\nResponse to user:\n${aiResponse.answer}\n`);
+      conversationHistory.push(`\nCONVERSATION HISTORY ROLE: LLM - ${currentSpecialization}\n\nResponse to user:\n${aiResponse.answer}\n`);
       
       perfMetrics.logMetrics();
 
@@ -1047,7 +969,7 @@ async function runAIAgent(userPrompt) {
         answer: aiResponse.answer,
         conversationHistory: conversationHistory,
         metrics: perfMetrics.getMetrics(), 
-        specialization: currentSpecialization ? currentSpecialization.name : 'none'
+        specialization: currentSpecialization ? currentSpecialization : 'none'
       };
     }
   }
@@ -1059,7 +981,7 @@ async function runAIAgent(userPrompt) {
     answer: "I couldn't complete your request after 5 agent itterations.",
     conversationHistory: conversationHistory,
     metrics: perfMetrics.getMetrics(), 
-    specialization: currentSpecialization ? currentSpecialization.name : 'none'
+    specialization: currentSpecialization ? currentSpecialization : 'none'
   };
 }
 
