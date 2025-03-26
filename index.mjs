@@ -491,7 +491,10 @@ async function retrieveRelevantKnowledge(params) {
     // Return successful result
     return {
       success: true,
-      data: data
+      data: data.map(item => ({
+        topic: item.topic,
+        content: item.content
+      }))
     };
   } catch (error) {
     console.error('Knowledge Retrieval Error:', error);
@@ -580,9 +583,10 @@ const getInstructionsPrompt = (specialization = null) => {
   - Knowledge retrieval tool. 
   - Before providing the final answer to a user query, gather relevant context by using the retrieveRelevantKnowledge function with a search query as the parameter. 
   - This performs a vector search for knowledge snippets using any 4 or more letter words in your query.
-  - Matches in the topic field are weighted more heavily (3x) than matches in content
+  - Matches in the topic field are weighted more heavily (3x) than matches in content. 
   - Results are adjusted by the confidence score
   - Results are sorted by relevance score  
+  - Review the list of knowledge topics that will be included below the system prompt instructions, and before the conversation history. This contains the exact topics of all of the available knowledge, so you know what keywords to use to search. You can add additional keywords not in this list so you can find references in the 'content' of each of the knowledge snippets as well, not just the 'topic' fields.
   - Example: If the user asks you to add apples to his shopping list, calling this function may reveal that the user only likes opal apples, and you should add opal apples to their shopping list.
   - The user keeps his knowledge snippets database updated with preferences for how you should answer questions or perform activities related to specific topics or items.   
   - Tips for effective searching:
@@ -590,6 +594,7 @@ const getInstructionsPrompt = (specialization = null) => {
     * Use multiple keywords in each search to ensure you don't miss any knowledge that doesn't exactly match your keyword (such as for "School", also search "College University School Education"]). It is better to use more search terms than less.
     * Try synonyms 
     * Capitalize the first letter of each keyword (e.g., "Project" not "project")
+     
   Parameters:
   - query (Required): Search query
   - limit (Optional): Maximum results (default: 50)
@@ -905,6 +910,21 @@ async function runAIAgent(userPrompt) {
   let iterations = 0;
   let functionsResult = null;   
 
+  // Fetch unique topic values from knowledge_snippets table
+  const { data, error } = await supabase
+  .from('knowledge_snippets')
+  .select('topic')
+  .order('topic');
+
+  if (error) {
+  console.error('Error fetching knowledge snippets:', error);
+  throw error;
+  }
+
+  // Extract unique topics
+  const knowledgeList = [...new Set(data.map(item => item.topic))];
+  const knowledgeTopics = `\n\n--- Knowledge Topics available for the retrieveRelevantKnowledge tool:\n${JSON.stringify(knowledgeList, null, 2)}`;
+
   while (iterations < MAX_ITERATIONS) {
     iterations++;
     console.log(`\n--- Iteration ${iterations} ---`);
@@ -926,7 +946,7 @@ async function runAIAgent(userPrompt) {
     }
     
     // Combine everything into the full agent prompt
-    const fullAgentPrompt = getInstructionsPrompt(currentSpecialization) + historyText; // + currentfunctionsResult;
+    const fullAgentPrompt = getInstructionsPrompt(currentSpecialization) + knowledgeTopics + historyText; // + currentfunctionsResult;
     console.log(`Full Prompt: ${fullAgentPrompt}`);
 
     // Prepare messages for the AI request
@@ -992,12 +1012,24 @@ export const handler = async (event) => {
     
     // Parse the user query from the event
     let userQuery;
+    let userId;
     
     // Check if the event is from API Gateway
     if (event.body) {
-      // Handle API Gateway request
-      const body = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
-      userQuery = body.query || "No query provided";
+      // Check for content type to determine how to parse the body
+      const contentType = event.headers && (event.headers['Content-Type'] || event.headers['content-type']);
+      
+      if (contentType && contentType.includes('application/x-www-form-urlencoded')) {
+        // Handle form-encoded data
+        const formData = parseFormData(event.body);
+        userQuery = formData.query;
+        userId = formData.userId;
+      } else {
+        // Handle JSON data (default)
+        const body = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
+        userQuery = body.query;
+        userId = body.userId;
+      }
     } else if (event.queryStringParameters && event.queryStringParameters.query) {
       // Handle query string parameter
       userQuery = event.queryStringParameters.query;
@@ -1006,25 +1038,40 @@ export const handler = async (event) => {
       userQuery = event.query || "No query provided";
     }
     
+
     // Run the AI agent with the user's query
     const result = await runAIAgent(userQuery);
     
     // Return a properly formatted response for API Gateway
-    return {
-      statusCode: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*', // For CORS support
-        'Access-Control-Allow-Headers': 'Content-Type',
-        'Access-Control-Allow-Methods': 'OPTIONS,POST,GET'
-      },
-      body: {
-        message: result.answer,
-        conversationHistory: result.conversationHistory,
-        metrics: result.metrics, 
-        specialization: result.specialization
-      }
-    };
+    if (userId === 'phone') {
+      return {
+        statusCode: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*', // For CORS support
+          'Access-Control-Allow-Headers': 'Content-Type',
+          'Access-Control-Allow-Methods': 'OPTIONS,POST,GET'
+        },
+        body: result.answer 
+      };
+    }
+    else {
+      return {
+        statusCode: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*', // For CORS support
+          'Access-Control-Allow-Headers': 'Content-Type',
+          'Access-Control-Allow-Methods': 'OPTIONS,POST,GET'
+        },
+        body: JSON.stringify({
+          message: result.answer,
+          conversationHistory: result.conversationHistory,
+          metrics: result.metrics,
+          specialization: result.specialization
+        })
+      };
+    }
   } catch (error) {
     console.error('Error processing request:', error);
     
@@ -1037,13 +1084,28 @@ export const handler = async (event) => {
         'Access-Control-Allow-Headers': 'Content-Type',
         'Access-Control-Allow-Methods': 'OPTIONS,POST,GET'
       },
-      body: {
+      body: JSON.stringify({
         message: 'Error processing your request',
         error: error.message
-      }
+      })
     };
   }
 };
+
+// Helper function to parse form-encoded data
+function parseFormData(formBody) {
+  const result = {};
+  const pairs = formBody.split('&');
+  
+  pairs.forEach(pair => {
+    const [key, value] = pair.split('=');
+    if (key && value) {
+      result[decodeURIComponent(key)] = decodeURIComponent(value.replace(/\+/g, ' '));
+    }
+  });
+  
+  return result;
+}
 
 // Performance tracking utility
 const perfMetrics = {
